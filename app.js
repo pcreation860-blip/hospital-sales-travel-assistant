@@ -13,7 +13,10 @@ const state = JSON.parse(localStorage.getItem("hsTravelApp") || "null") || {
     lastBackup: null,
     backupSize: 0,
     count: 0,
+    firebaseConnected: false,
+    firebaseLastBackup: null,
   },
+  firebaseConfig: null,
   queue: ["Initial local database created"],
   cities: ["Bhubaneswar"],
 };
@@ -22,6 +25,11 @@ if (!("locationDetected" in state)) state.locationDetected = false;
 if (!("location" in state)) state.location = null;
 if (!("customStays" in state)) state.customStays = [];
 if (!("backup" in state)) state.backup = { auto: true, lastBackup: null, backupSize: 0, count: 0 };
+if (!("firebaseConfig" in state)) state.firebaseConfig = null;
+if (!("firebaseConnected" in state.backup)) state.backup.firebaseConnected = false;
+if (!("firebaseLastBackup" in state.backup)) state.backup.firebaseLastBackup = null;
+
+let firebaseRuntime = null;
 
 const staySeeds = [
   { name: "City Backpackers Hostel", type: "Bunk Bed Hostel", price: 649, rating: 4.6, distance: 1.2, amenities: "AC, clean beds, clean bathrooms, lockers", source: "Hostelworld / Booking.com" },
@@ -271,6 +279,143 @@ function restoreBackupFile(file) {
     }
   };
   reader.readAsText(file);
+}
+
+function firebaseConfigFromForm() {
+  return {
+    apiKey: document.getElementById("firebaseApiKey").value.trim(),
+    authDomain: document.getElementById("firebaseAuthDomain").value.trim(),
+    projectId: document.getElementById("firebaseProjectId").value.trim(),
+    storageBucket: document.getElementById("firebaseStorageBucket").value.trim(),
+    appId: document.getElementById("firebaseAppId").value.trim(),
+  };
+}
+
+function fillFirebaseForm() {
+  const config = state.firebaseConfig || {};
+  document.getElementById("firebaseApiKey").value = config.apiKey || "";
+  document.getElementById("firebaseAuthDomain").value = config.authDomain || "";
+  document.getElementById("firebaseProjectId").value = config.projectId || "";
+  document.getElementById("firebaseStorageBucket").value = config.storageBucket || "";
+  document.getElementById("firebaseAppId").value = config.appId || "";
+}
+
+function validateFirebaseConfig(config) {
+  return config.apiKey && config.authDomain && config.projectId && config.appId;
+}
+
+async function loadFirebaseRuntime(config) {
+  if (firebaseRuntime) return firebaseRuntime;
+  const appModule = await import("https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js");
+  const authModule = await import("https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js");
+  const dbModule = await import("https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js");
+
+  const app = appModule.initializeApp(config);
+  const auth = authModule.getAuth(app);
+  const db = dbModule.getFirestore(app);
+  const credential = await authModule.signInAnonymously(auth);
+
+  firebaseRuntime = {
+    auth,
+    db,
+    userId: credential.user.uid,
+    doc: dbModule.doc,
+    getDoc: dbModule.getDoc,
+    setDoc: dbModule.setDoc,
+    deleteDoc: dbModule.deleteDoc,
+    serverTimestamp: dbModule.serverTimestamp,
+  };
+  return firebaseRuntime;
+}
+
+async function connectFirebase() {
+  const config = firebaseConfigFromForm();
+  if (!validateFirebaseConfig(config)) {
+    alert("Paste API key, Auth domain, Project ID, and App ID first.");
+    return;
+  }
+  try {
+    document.getElementById("firebaseCloudStatus").textContent = "Connecting";
+    await loadFirebaseRuntime(config);
+    state.firebaseConfig = config;
+    state.backup.firebaseConnected = true;
+    addQueue("Firebase connected");
+    localStorage.setItem("hsTravelApp", JSON.stringify(state));
+    renderAll();
+    alert("Firebase connected. You can now use Cloud backup now.");
+  } catch (error) {
+    document.getElementById("firebaseCloudStatus").textContent = "Failed";
+    alert(`Firebase connection failed: ${error.message}`);
+  }
+}
+
+async function cloudBackupNow() {
+  const config = state.firebaseConfig || firebaseConfigFromForm();
+  if (!validateFirebaseConfig(config)) {
+    alert("Connect Firebase first.");
+    return;
+  }
+  try {
+    document.getElementById("firebaseCloudStatus").textContent = "Uploading";
+    const runtime = await loadFirebaseRuntime(config);
+    const backup = backupPayload();
+    await runtime.setDoc(runtime.doc(runtime.db, "users", runtime.userId, "backups", "latest"), {
+      backup,
+      updatedAt: runtime.serverTimestamp(),
+    });
+    state.firebaseConfig = config;
+    state.backup.firebaseConnected = true;
+    state.backup.firebaseLastBackup = new Date().toISOString();
+    createBrowserBackup("Firebase cloud backup completed", true);
+    localStorage.setItem("hsTravelApp", JSON.stringify(state));
+    renderAll();
+  } catch (error) {
+    document.getElementById("firebaseCloudStatus").textContent = "Failed";
+    alert(`Cloud backup failed: ${error.message}`);
+  }
+}
+
+async function restoreFromCloud() {
+  const config = state.firebaseConfig || firebaseConfigFromForm();
+  if (!validateFirebaseConfig(config)) {
+    alert("Connect Firebase first.");
+    return;
+  }
+  try {
+    document.getElementById("firebaseCloudStatus").textContent = "Restoring";
+    const runtime = await loadFirebaseRuntime(config);
+    const snap = await runtime.getDoc(runtime.doc(runtime.db, "users", runtime.userId, "backups", "latest"));
+    if (!snap.exists()) {
+      alert("No cloud backup found for this Firebase anonymous user.");
+      renderAll();
+      return;
+    }
+    const restored = snap.data().backup.data;
+    localStorage.setItem("hsTravelApp", JSON.stringify(restored));
+    alert("Cloud backup restored. The page will reload now.");
+    window.location.reload();
+  } catch (error) {
+    document.getElementById("firebaseCloudStatus").textContent = "Failed";
+    alert(`Cloud restore failed: ${error.message}`);
+  }
+}
+
+async function deleteCloudBackup() {
+  if (!confirm("Delete the latest Firebase cloud backup?")) return;
+  const config = state.firebaseConfig || firebaseConfigFromForm();
+  if (!validateFirebaseConfig(config)) {
+    alert("Connect Firebase first.");
+    return;
+  }
+  try {
+    const runtime = await loadFirebaseRuntime(config);
+    await runtime.deleteDoc(runtime.doc(runtime.db, "users", runtime.userId, "backups", "latest"));
+    state.backup.firebaseLastBackup = null;
+    addQueue("Firebase cloud backup deleted");
+    save();
+  } catch (error) {
+    alert(`Delete cloud backup failed: ${error.message}`);
+  }
 }
 
 function getStayResults() {
@@ -710,7 +855,11 @@ function renderPriority() {
 function renderBackup() {
   const backupText = localStorage.getItem("hsTravelCloudBackup");
   const backupSize = backupText ? Math.ceil(backupText.length / 1024) : 0;
+  fillFirebaseForm();
   document.getElementById("autoBackupStatus").textContent = state.backup.auto ? "On" : "Off";
+  document.getElementById("firebaseCloudStatus").textContent = state.backup.firebaseConnected
+    ? (state.backup.firebaseLastBackup ? `Backed up ${new Date(state.backup.firebaseLastBackup).toLocaleString()}` : "Connected")
+    : "Not connected";
   document.getElementById("lastBackupStatus").textContent = state.backup.lastBackup
     ? new Date(state.backup.lastBackup).toLocaleString()
     : "Not yet";
@@ -845,6 +994,10 @@ document.getElementById("autoBackupToggle").addEventListener("change", (event) =
 document.getElementById("restoreBackupFile").addEventListener("change", (event) => {
   restoreBackupFile(event.target.files[0]);
 });
+document.getElementById("connectFirebaseBtn").addEventListener("click", connectFirebase);
+document.getElementById("cloudBackupBtn").addEventListener("click", cloudBackupNow);
+document.getElementById("cloudRestoreBtn").addEventListener("click", restoreFromCloud);
+document.getElementById("deleteCloudBackupBtn").addEventListener("click", deleteCloudBackup);
 document.getElementById("recordAudioBtn").addEventListener("click", simulateAudioNote);
 document.getElementById("stopAudioBtn").addEventListener("click", stopAndTranscribeAudio);
 document.getElementById("summarizeBtn").addEventListener("click", createAiSummary);

@@ -38,7 +38,7 @@
         <div>
           <p class="eyebrow">Kolkata base / India field sales</p>
           <h1 id="pageTitle">Dashboard</h1>
-          <p class="version-tag">Updated version: auto backup + mobile layout + luxury pool stay + price compare</p>
+          <p class="version-tag">Updated version: Firebase cloud backup + mobile layout + luxury pool stay</p>
         </div>
         <div class="city-control">
           <label for="cityInput">Current city</label>
@@ -272,8 +272,26 @@
             <div class="backup-status">
               <div><span>Local device</span><strong>Active</strong></div>
               <div><span>Auto backup</span><strong id="autoBackupStatus">On</strong></div>
+              <div><span>Firebase cloud</span><strong id="firebaseCloudStatus">Not connected</strong></div>
               <div><span>Last backup</span><strong id="lastBackupStatus">Not yet</strong></div>
               <div><span>Backup size</span><strong id="backupSizeStatus">0 KB</strong></div>
+            </div>
+            <div class="firebase-box">
+              <h2>Firebase Cloud Backup</h2>
+              <p>Paste your Firebase web app config once. It will be saved only in this browser.</p>
+              <form class="form-grid single">
+                <label>API key<input id="firebaseApiKey" placeholder="AIza..." /></label>
+                <label>Auth domain<input id="firebaseAuthDomain" placeholder="your-project.firebaseapp.com" /></label>
+                <label>Project ID<input id="firebaseProjectId" placeholder="your-project-id" /></label>
+                <label>Storage bucket<input id="firebaseStorageBucket" placeholder="your-project.appspot.com" /></label>
+                <label>App ID<input id="firebaseAppId" placeholder="1:..." /></label>
+              </form>
+              <div class="button-row">
+                <button id="connectFirebaseBtn" class="secondary">Connect Firebase</button>
+                <button id="cloudBackupBtn" class="primary">Cloud backup now</button>
+                <button id="cloudRestoreBtn" class="secondary">Restore from cloud</button>
+                <button id="deleteCloudBackupBtn" class="danger">Delete cloud backup</button>
+              </div>
             </div>
             <div class="backup-actions">
               <label class="toggle-row"><input id="autoBackupToggle" type="checkbox" checked /> Auto backup after every save</label>

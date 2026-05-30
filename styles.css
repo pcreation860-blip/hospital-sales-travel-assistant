@@ -661,6 +661,12 @@ tr:last-child td {
   margin-top: 14px;
 }
 
+.firebase-box {
+  border-top: 1px solid var(--line);
+  margin-top: 16px;
+  padding-top: 16px;
+}
+
 .backup-actions .secondary,
 .backup-actions .danger {
   margin-top: 0;
