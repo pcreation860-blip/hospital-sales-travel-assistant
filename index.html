@@ -38,7 +38,7 @@
         <div>
           <p class="eyebrow">Kolkata base / India field sales</p>
           <h1 id="pageTitle">Dashboard</h1>
-          <p class="version-tag">Updated version: location + CRM cards + luxury pool stay + price compare</p>
+          <p class="version-tag">Updated version: auto backup + mobile layout + luxury pool stay + price compare</p>
         </div>
         <div class="city-control">
           <label for="cityInput">Current city</label>
@@ -271,15 +271,25 @@
             <h2>Backup Dashboard</h2>
             <div class="backup-status">
               <div><span>Local device</span><strong>Active</strong></div>
-              <div><span>Firebase</span><strong id="firebaseStatus">Ready</strong></div>
-              <div><span>Google Drive</span><strong id="driveStatus">Ready</strong></div>
-              <div><span>AWS optional</span><strong>Not connected</strong></div>
+              <div><span>Auto backup</span><strong id="autoBackupStatus">On</strong></div>
+              <div><span>Last backup</span><strong id="lastBackupStatus">Not yet</strong></div>
+              <div><span>Backup size</span><strong id="backupSizeStatus">0 KB</strong></div>
             </div>
-            <button id="syncBtn" class="primary">Run backup sync</button>
+            <div class="backup-actions">
+              <label class="toggle-row"><input id="autoBackupToggle" type="checkbox" checked /> Auto backup after every save</label>
+              <button id="syncBtn" class="primary">Backup now</button>
+              <button id="downloadBackupBtn" class="secondary">Download backup file</button>
+              <label class="file-restore">
+                Restore from backup file
+                <input id="restoreBackupFile" type="file" accept="application/json" />
+              </label>
+              <button id="deleteBackupBtn" class="danger">Delete backup</button>
+            </div>
+            <p class="backup-note">Free mode stores a backup in this browser and lets you download a file for Google Drive. For true automatic cloud sync across phones, connect Firebase later.</p>
           </section>
 
           <section class="panel">
-            <h2>Offline Queue</h2>
+            <h2>Backup History</h2>
             <div id="queueList" class="queue-list"></div>
           </section>
         </div>

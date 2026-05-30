@@ -224,7 +224,8 @@ select {
 
 .icon-btn,
 .primary,
-.secondary {
+.secondary,
+.danger {
   border-radius: 8px;
   min-height: 40px;
   padding: 0 14px;
@@ -250,6 +251,11 @@ select {
   background: #e9eef5;
   color: var(--ink);
   margin-top: 14px;
+}
+
+.danger {
+  background: #fee4e2;
+  color: var(--red);
 }
 
 .button-row {
@@ -649,6 +655,48 @@ tr:last-child td {
   padding: 12px;
 }
 
+.backup-actions {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.backup-actions .secondary,
+.backup-actions .danger {
+  margin-top: 0;
+}
+
+.toggle-row,
+.file-restore {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  border-radius: 8px;
+  padding: 12px;
+  font-weight: 700;
+}
+
+.toggle-row input {
+  width: auto;
+}
+
+.file-restore {
+  display: grid;
+  align-items: start;
+}
+
+.file-restore input {
+  padding: 8px;
+  background: #ffffff;
+}
+
+.backup-note {
+  margin-top: 12px;
+  font-size: 13px;
+}
+
 .backup-status span,
 .queue-item span,
 .timeline-item span,
@@ -666,10 +714,17 @@ tr:last-child td {
   .sidebar {
     position: static;
     min-height: auto;
+    padding: 16px;
   }
 
   .nav {
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    overflow-x: auto;
+  }
+
+  .nav-btn {
+    text-align: center;
+    white-space: nowrap;
   }
 
   .topbar,
@@ -693,12 +748,30 @@ tr:last-child td {
 }
 
 @media (max-width: 620px) {
+  body {
+    font-size: 15px;
+  }
+
   .app-shell {
-    padding: 18px;
+    padding: 14px;
+  }
+
+  .topbar {
+    gap: 12px;
+  }
+
+  h1 {
+    font-size: 25px;
   }
 
   .nav {
-    grid-template-columns: 1fr 1fr;
+    display: flex;
+    overflow-x: auto;
+    padding-bottom: 2px;
+  }
+
+  .nav-btn {
+    min-width: 132px;
   }
 
   .city-control {
@@ -715,6 +788,37 @@ tr:last-child td {
 
   .result-card {
     grid-template-columns: 1fr;
+  }
+
+  .button-row,
+  .contact-actions,
+  .backup-actions {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .primary,
+  .secondary,
+  .danger,
+  .mini-btn {
+    width: 100%;
+  }
+
+  .metric {
+    padding: 14px;
+  }
+
+  .metric strong {
+    font-size: 26px;
+  }
+
+  .route-visual {
+    min-height: 230px;
+  }
+
+  .price-row {
+    grid-template-columns: 1fr;
+    align-items: stretch;
   }
 
   .stay-photo,

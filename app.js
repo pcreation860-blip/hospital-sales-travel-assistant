@@ -8,6 +8,12 @@ const state = JSON.parse(localStorage.getItem("hsTravelApp") || "null") || {
   route: [],
   visits: [],
   cards: [],
+  backup: {
+    auto: true,
+    lastBackup: null,
+    backupSize: 0,
+    count: 0,
+  },
   queue: ["Initial local database created"],
   cities: ["Bhubaneswar"],
 };
@@ -15,6 +21,7 @@ if (!("selectedHospitalId" in state)) state.selectedHospitalId = null;
 if (!("locationDetected" in state)) state.locationDetected = false;
 if (!("location" in state)) state.location = null;
 if (!("customStays" in state)) state.customStays = [];
+if (!("backup" in state)) state.backup = { auto: true, lastBackup: null, backupSize: 0, count: 0 };
 
 const staySeeds = [
   { name: "City Backpackers Hostel", type: "Bunk Bed Hostel", price: 649, rating: 4.6, distance: 1.2, amenities: "AC, clean beds, clean bathrooms, lockers", source: "Hostelworld / Booking.com" },
@@ -90,6 +97,7 @@ const indianCities = [
 ];
 
 function save() {
+  if (state.backup?.auto) createBrowserBackup("Auto backup saved", false);
   localStorage.setItem("hsTravelApp", JSON.stringify(state));
   renderAll();
 }
@@ -209,6 +217,60 @@ function setView(viewId) {
 function addQueue(item) {
   state.queue.unshift(`${item} - ${new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`);
   state.queue = state.queue.slice(0, 8);
+}
+
+function backupPayload() {
+  return {
+    app: "Hospital Sales Travel Assistant",
+    version: "free-web-backup-1",
+    createdAt: new Date().toISOString(),
+    data: state,
+  };
+}
+
+function createBrowserBackup(message = "Backup saved", shouldLog = true) {
+  const payload = JSON.stringify(backupPayload(), null, 2);
+  localStorage.setItem("hsTravelCloudBackup", payload);
+  state.backup.lastBackup = new Date().toISOString();
+  state.backup.backupSize = payload.length;
+  state.backup.count = Number(state.backup.count || 0) + 1;
+  if (shouldLog) addQueue(message);
+}
+
+function deleteBrowserBackup() {
+  if (!confirm("Delete the saved browser backup? Your current app data will stay, but the backup copy will be removed.")) return;
+  localStorage.removeItem("hsTravelCloudBackup");
+  state.backup.auto = false;
+  state.backup.lastBackup = null;
+  state.backup.backupSize = 0;
+  state.backup.count = 0;
+  addQueue("Backup deleted");
+  save();
+}
+
+function downloadBackup() {
+  createBrowserBackup("Backup file prepared", false);
+  downloadFile("hospital-sales-online-backup.json", localStorage.getItem("hsTravelCloudBackup"), "application/json");
+  addQueue("Backup file downloaded");
+  save();
+}
+
+function restoreBackupFile(file) {
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const parsed = JSON.parse(reader.result);
+      const restored = parsed.data || parsed;
+      localStorage.setItem("hsTravelApp", JSON.stringify(restored));
+      localStorage.setItem("hsTravelCloudBackup", JSON.stringify(parsed, null, 2));
+      alert("Backup restored. The page will reload now.");
+      window.location.reload();
+    } catch {
+      alert("This backup file could not be read.");
+    }
+  };
+  reader.readAsText(file);
 }
 
 function getStayResults() {
@@ -646,9 +708,17 @@ function renderPriority() {
 }
 
 function renderBackup() {
+  const backupText = localStorage.getItem("hsTravelCloudBackup");
+  const backupSize = backupText ? Math.ceil(backupText.length / 1024) : 0;
+  document.getElementById("autoBackupStatus").textContent = state.backup.auto ? "On" : "Off";
+  document.getElementById("lastBackupStatus").textContent = state.backup.lastBackup
+    ? new Date(state.backup.lastBackup).toLocaleString()
+    : "Not yet";
+  document.getElementById("backupSizeStatus").textContent = `${backupSize} KB`;
+  document.getElementById("autoBackupToggle").checked = Boolean(state.backup.auto);
   document.getElementById("queueList").innerHTML = state.queue.length
-    ? state.queue.map((item) => `<div class="queue-item"><strong>Pending sync item</strong><br /><span>${item}</span></div>`).join("")
-    : `<div class="empty-state">No pending offline items.</div>`;
+    ? state.queue.map((item) => `<div class="queue-item"><strong>Backup event</strong><br /><span>${item}</span></div>`).join("")
+    : `<div class="empty-state">No backup history yet.</div>`;
 }
 
 function renderMetrics() {
@@ -664,15 +734,12 @@ function renderMetrics() {
 }
 
 function runSync() {
-  document.getElementById("syncLabel").textContent = "Syncing";
-  document.getElementById("firebaseStatus").textContent = "Uploading";
-  document.getElementById("driveStatus").textContent = "Uploading";
+  document.getElementById("syncLabel").textContent = "Backing up";
   setTimeout(() => {
-    state.queue = [];
+    createBrowserBackup("Manual backup completed", true);
     document.getElementById("syncLabel").textContent = "Synced";
-    document.getElementById("firebaseStatus").textContent = "Synced";
-    document.getElementById("driveStatus").textContent = "Synced";
-    save();
+    localStorage.setItem("hsTravelApp", JSON.stringify(state));
+    renderAll();
   }, 700);
 }
 
@@ -768,6 +835,16 @@ document.getElementById("saveVisitBtn").addEventListener("click", saveVisit);
 document.getElementById("scanCardBtn").addEventListener("click", simulateCardOcr);
 document.getElementById("saveCardBtn").addEventListener("click", saveCard);
 document.getElementById("syncBtn").addEventListener("click", runSync);
+document.getElementById("downloadBackupBtn").addEventListener("click", downloadBackup);
+document.getElementById("deleteBackupBtn").addEventListener("click", deleteBrowserBackup);
+document.getElementById("autoBackupToggle").addEventListener("change", (event) => {
+  state.backup.auto = event.target.checked;
+  addQueue(state.backup.auto ? "Auto backup turned on" : "Auto backup turned off");
+  save();
+});
+document.getElementById("restoreBackupFile").addEventListener("change", (event) => {
+  restoreBackupFile(event.target.files[0]);
+});
 document.getElementById("recordAudioBtn").addEventListener("click", simulateAudioNote);
 document.getElementById("stopAudioBtn").addEventListener("click", stopAndTranscribeAudio);
 document.getElementById("summarizeBtn").addEventListener("click", createAiSummary);
