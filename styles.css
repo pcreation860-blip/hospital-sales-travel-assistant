@@ -184,6 +184,13 @@ h2 {
   margin-bottom: 6px;
 }
 
+.city-control small {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+  margin-top: 7px;
+}
+
 .city-control div {
   display: flex;
   gap: 8px;
@@ -429,6 +436,11 @@ select {
   font-size: 13px;
 }
 
+.contact-actions .mini-btn {
+  width: 100%;
+  font-size: 13px;
+}
+
 .stay-photo,
 .card-photo {
   width: 86px;
@@ -466,6 +478,45 @@ select {
   border: 1px dashed #c7d4e1;
   border-radius: 8px;
   padding: 18px;
+}
+
+.manual-stay {
+  margin-top: 18px;
+  border-top: 1px solid var(--line);
+  padding-top: 16px;
+}
+
+.price-compare {
+  margin-top: 16px;
+}
+
+.price-list {
+  display: grid;
+  gap: 8px;
+}
+
+.price-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+  gap: 10px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px;
+}
+
+.price-row span {
+  color: var(--muted);
+}
+
+.price-row a {
+  text-decoration: none;
+  color: #ffffff;
+  background: var(--blue);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-weight: 700;
 }
 
 .route-summary {

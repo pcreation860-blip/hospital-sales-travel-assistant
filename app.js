@@ -1,6 +1,9 @@
 const state = JSON.parse(localStorage.getItem("hsTravelApp") || "null") || {
   city: "Bhubaneswar",
+  locationDetected: false,
+  location: null,
   selectedStay: null,
+  customStays: [],
   selectedHospitalId: null,
   route: [],
   visits: [],
@@ -9,12 +12,29 @@ const state = JSON.parse(localStorage.getItem("hsTravelApp") || "null") || {
   cities: ["Bhubaneswar"],
 };
 if (!("selectedHospitalId" in state)) state.selectedHospitalId = null;
+if (!("locationDetected" in state)) state.locationDetected = false;
+if (!("location" in state)) state.location = null;
+if (!("customStays" in state)) state.customStays = [];
 
 const staySeeds = [
   { name: "City Backpackers Hostel", type: "Bunk Bed Hostel", price: 649, rating: 4.6, distance: 1.2, amenities: "AC, clean beds, clean bathrooms, lockers", source: "Hostelworld / Booking.com" },
   { name: "Metro Dorm Stay", type: "Bunk Bed Hostel", price: 590, rating: 4.3, distance: 2.4, amenities: "AC, clean bathrooms, Wi-Fi", source: "Agoda / Hostelz" },
   { name: "Railway Budget Pods", type: "Bunk Bed Hostel", price: 520, rating: 4.1, distance: 0.9, amenities: "AC dorm, clean bedding, shared bath", source: "Goibibo / MakeMyTrip" },
   { name: "Comfort Inn Budget", type: "Budget Hotel", price: 1180, rating: 4.4, distance: 3.1, amenities: "AC room, private bath, clean linen", source: "Booking.com / Goibibo" },
+  { name: "Google Result Hostel", type: "Bunk Bed Hostel", price: 750, rating: 4.2, distance: 1.8, amenities: "Verify AC, beds, bathrooms before booking", source: "Google Maps sample" },
+  { name: "Google Result Budget Hotel", type: "Budget Hotel", price: 1250, rating: 4.1, distance: 2.6, amenities: "Verify AC, beds, bathrooms before booking", source: "Google Maps sample" },
+  { name: "Poolside Comfort Residency", type: "Luxury Stay With Pool", price: 2199, rating: 4.3, distance: 3.4, amenities: "Swimming pool, AC, clean room, clean bathroom, breakfast", source: "Luxury comparison sample" },
+  { name: "Royal Orchid Pool Stay", type: "Luxury Stay With Pool", price: 3299, rating: 4.5, distance: 4.8, amenities: "Swimming pool, AC, premium room, clean bathroom, parking", source: "Luxury comparison sample" },
+  { name: "Grand Azure Hotel", type: "Luxury Stay With Pool", price: 4899, rating: 4.7, distance: 5.2, amenities: "Swimming pool, AC, premium bedding, restaurant, gym", source: "Luxury comparison sample" },
+];
+
+const travelSites = [
+  { site: "Booking.com", factor: 1.06 },
+  { site: "Agoda", factor: 0.96 },
+  { site: "Goibibo", factor: 0.92 },
+  { site: "MakeMyTrip", factor: 1.02 },
+  { site: "Hostelworld", factor: 0.98 },
+  { site: "Google Hotels", factor: 1.0 },
 ];
 
 const hospitalNames = [
@@ -36,6 +56,39 @@ const hospitalTypes = [
   "Specialty Centre",
 ];
 
+const indianCities = [
+  { city: "Kolkata", lat: 22.5726, lon: 88.3639 },
+  { city: "Howrah", lat: 22.5958, lon: 88.2636 },
+  { city: "Bhubaneswar", lat: 20.2961, lon: 85.8245 },
+  { city: "Cuttack", lat: 20.4625, lon: 85.8828 },
+  { city: "Puri", lat: 19.8135, lon: 85.8312 },
+  { city: "Rourkela", lat: 22.2604, lon: 84.8536 },
+  { city: "Patna", lat: 25.5941, lon: 85.1376 },
+  { city: "Ranchi", lat: 23.3441, lon: 85.3096 },
+  { city: "Jamshedpur", lat: 22.8046, lon: 86.2029 },
+  { city: "Durgapur", lat: 23.5204, lon: 87.3119 },
+  { city: "Asansol", lat: 23.6739, lon: 86.9524 },
+  { city: "Siliguri", lat: 26.7271, lon: 88.3953 },
+  { city: "Guwahati", lat: 26.1445, lon: 91.7362 },
+  { city: "Delhi", lat: 28.6139, lon: 77.2090 },
+  { city: "Mumbai", lat: 19.0760, lon: 72.8777 },
+  { city: "Pune", lat: 18.5204, lon: 73.8567 },
+  { city: "Bengaluru", lat: 12.9716, lon: 77.5946 },
+  { city: "Hyderabad", lat: 17.3850, lon: 78.4867 },
+  { city: "Chennai", lat: 13.0827, lon: 80.2707 },
+  { city: "Ahmedabad", lat: 23.0225, lon: 72.5714 },
+  { city: "Surat", lat: 21.1702, lon: 72.8311 },
+  { city: "Jaipur", lat: 26.9124, lon: 75.7873 },
+  { city: "Lucknow", lat: 26.8467, lon: 80.9462 },
+  { city: "Kanpur", lat: 26.4499, lon: 80.3319 },
+  { city: "Varanasi", lat: 25.3176, lon: 82.9739 },
+  { city: "Nagpur", lat: 21.1458, lon: 79.0882 },
+  { city: "Indore", lat: 22.7196, lon: 75.8577 },
+  { city: "Bhopal", lat: 23.2599, lon: 77.4126 },
+  { city: "Raipur", lat: 21.2514, lon: 81.6296 },
+  { city: "Visakhapatnam", lat: 17.6868, lon: 83.2185 },
+];
+
 function save() {
   localStorage.setItem("hsTravelApp", JSON.stringify(state));
   renderAll();
@@ -53,6 +106,100 @@ function currentTime() {
   return new Date().toTimeString().slice(0, 5);
 }
 
+function distanceKm(aLat, aLon, bLat, bLon) {
+  const earthRadius = 6371;
+  const toRad = (value) => (value * Math.PI) / 180;
+  const dLat = toRad(bLat - aLat);
+  const dLon = toRad(bLon - aLon);
+  const lat1 = toRad(aLat);
+  const lat2 = toRad(bLat);
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  return earthRadius * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function nearestIndianCity(lat, lon) {
+  return indianCities
+    .map((item) => ({ ...item, distance: distanceKm(lat, lon, item.lat, item.lon) }))
+    .sort((a, b) => a.distance - b.distance)[0];
+}
+
+function googleMapsSearchUrl(query) {
+  if (state.location?.lat && state.location?.lon) {
+    return `https://www.google.com/maps/search/${encodeURIComponent(query)}/@${state.location.lat},${state.location.lon},14z`;
+  }
+  return `https://www.google.com/maps/search/${encodeURIComponent(`${query} in ${state.city}`)}`;
+}
+
+function travelSiteSearchUrl(site, stayName) {
+  const query = encodeURIComponent(`${stayName} ${state.city}`);
+  const urls = {
+    "Booking.com": `https://www.booking.com/searchresults.html?ss=${query}`,
+    Agoda: `https://www.agoda.com/search?text=${query}`,
+    Goibibo: `https://www.goibibo.com/hotels/find-hotels-in-${encodeURIComponent(state.city)}/?searchText=${query}`,
+    MakeMyTrip: `https://www.makemytrip.com/hotels/hotel-listing/?searchText=${query}`,
+    Hostelworld: `https://www.hostelworld.com/search?search_keywords=${query}`,
+    "Google Hotels": `https://www.google.com/travel/hotels?q=${query}`,
+  };
+  return urls[site] || googleMapsSearchUrl(stayName);
+}
+
+function comparisonPrices(stay) {
+  return travelSites
+    .filter((item) => stay.type !== "Budget Hotel" || item.site !== "Hostelworld")
+    .map((item, index) => ({
+      site: item.site,
+      price: Math.max(350, Math.round(Number(stay.price || 0) * item.factor + index * 37)),
+      url: travelSiteSearchUrl(item.site, stay.name),
+    }))
+    .sort((a, b) => a.price - b.price);
+}
+
+function openGoogleStaySearch(kind) {
+  const query = kind === "hostel"
+    ? "bunk bed hostels near me with AC"
+    : kind === "luxury"
+      ? "luxury hotel with swimming pool near me best price"
+      : "budget hotels near me with AC";
+  window.open(googleMapsSearchUrl(query), "_blank");
+  addQueue(`Opened Google ${kind} search`);
+  save();
+}
+
+function detectCurrentCity() {
+  if (!navigator.geolocation) {
+    alert("Location is not supported in this browser. Please type the city manually.");
+    return;
+  }
+
+  document.getElementById("detectBtn").textContent = "...";
+  navigator.geolocation.getCurrentPosition(
+    (position) => {
+      const { latitude, longitude } = position.coords;
+      const match = nearestIndianCity(latitude, longitude);
+      state.city = match.city;
+      state.locationDetected = true;
+      state.location = {
+        lat: latitude,
+        lon: longitude,
+        matchedCity: match.city,
+        distanceKm: Number(match.distance.toFixed(1)),
+        detectedAt: new Date().toISOString(),
+      };
+      if (!state.cities.includes(state.city)) state.cities.push(state.city);
+      addQueue(`Location detected: ${state.city}`);
+      document.getElementById("detectBtn").textContent = "◎";
+      save();
+    },
+    () => {
+      document.getElementById("detectBtn").textContent = "◎";
+      alert("Please allow location permission, or type your city manually.");
+    },
+    { enableHighAccuracy: true, timeout: 12000, maximumAge: 300000 }
+  );
+}
+
 function setView(viewId) {
   document.querySelectorAll(".view").forEach((view) => view.classList.toggle("active", view.id === viewId));
   document.querySelectorAll(".nav-btn").forEach((button) => button.classList.toggle("active", button.dataset.view === viewId));
@@ -65,20 +212,32 @@ function addQueue(item) {
 }
 
 function getStayResults() {
-  return staySeeds
+  return [...staySeeds, ...state.customStays]
     .map((stay, index) => ({
       ...stay,
       id: `stay-${index}`,
       city: state.city,
       score: stay.rating * 20 - stay.price / 100 - stay.distance,
     }))
-    .sort((a, b) => b.rating - a.rating || a.price - b.price || a.distance - b.distance);
+    .sort((a, b) => b.score - a.score || b.rating - a.rating || a.price - b.price || a.distance - b.distance);
 }
 
-function renderStayResults() {
+function getLuxuryPoolResults() {
+  return [...staySeeds, ...state.customStays]
+    .filter((stay) => stay.type === "Luxury Stay With Pool" || /pool|swimming/i.test(stay.amenities || ""))
+    .map((stay, index) => ({
+      ...stay,
+      id: `luxury-${index}`,
+      city: state.city,
+      score: stay.rating * 20 - stay.price / 100 - stay.distance,
+    }))
+    .sort((a, b) => a.price - b.price || b.rating - a.rating || a.distance - b.distance);
+}
+
+function renderStayCards(stays) {
   const container = document.getElementById("stayResults");
   container.innerHTML = "";
-  getStayResults().forEach((stay) => {
+  stays.forEach((stay) => {
     const card = document.createElement("article");
     card.className = "result-card";
     card.innerHTML = `
@@ -87,20 +246,63 @@ function renderStayResults() {
         <strong>${stay.name}</strong>
         <span>${stay.type} / ${stay.source}</span><br />
         <span>${money(stay.price)} per night / Rating ${stay.rating} / ${stay.distance} km</span><br />
-        <span>${stay.amenities}</span>
+        <span>${stay.amenities}</span><br />
+        <span>Compare score ${Math.round(stay.score)} / ranked by review, price, distance</span>
       </div>
-      <button class="mini-btn" data-stay="${stay.id}">Select</button>
+      <div class="contact-actions">
+        ${stay.link ? `<a href="${stay.link}" target="_blank">Open</a>` : `<a href="${googleMapsSearchUrl(stay.name + " " + state.city)}" target="_blank">Google</a>`}
+        <button class="mini-btn" data-stay="${stay.id}">Select</button>
+      </div>
     `;
     container.appendChild(card);
   });
 }
 
+function renderStayResults() {
+  renderStayCards(getStayResults());
+}
+
+function renderLuxuryPoolResults() {
+  renderStayCards(getLuxuryPoolResults());
+  addQueue("Luxury pool stays sorted cheapest to highest");
+  save();
+}
+
+function addManualStay() {
+  const name = document.getElementById("manualStayName").value.trim();
+  if (!name) {
+    alert("Add the stay name first.");
+    return;
+  }
+  const stay = {
+    name,
+    type: document.getElementById("manualStayType").value,
+    price: Number(document.getElementById("manualStayPrice").value || 0),
+    rating: Number(document.getElementById("manualStayRating").value || 0),
+    distance: Number(document.getElementById("manualStayDistance").value || 0),
+    amenities: document.getElementById("manualStayAmenities").value.trim() || "Verify AC, clean beds, clean bathrooms",
+    link: document.getElementById("manualStayLink").value.trim(),
+    source: "Added from Google",
+  };
+  state.customStays.unshift(stay);
+  addQueue(`Stay added for comparison: ${stay.name}`);
+  document.getElementById("manualStayName").value = "";
+  document.getElementById("manualStayPrice").value = "";
+  document.getElementById("manualStayRating").value = "";
+  document.getElementById("manualStayDistance").value = "";
+  document.getElementById("manualStayAmenities").value = "";
+  document.getElementById("manualStayLink").value = "";
+  save();
+}
+
 function renderSelectedStay() {
   const box = document.getElementById("selectedStay");
+  const compareBox = document.getElementById("priceCompare");
   const routeStart = document.getElementById("routeStart");
   if (!state.selectedStay) {
     box.className = "empty-state";
     box.textContent = "Choose an accommodation to start route planning.";
+    compareBox.innerHTML = "";
     routeStart.textContent = "Start: No stay selected";
     return;
   }
@@ -110,6 +312,19 @@ function renderSelectedStay() {
     <span>${state.selectedStay.city} / ${state.selectedStay.type}</span><br />
     <span>${money(state.selectedStay.price)} / Rating ${state.selectedStay.rating} / ${state.selectedStay.distance} km</span><br />
     <span>${state.selectedStay.amenities}</span>
+  `;
+  compareBox.innerHTML = `
+    <h2>Compare Prices</h2>
+    <p>Same stay across travel websites. Cheapest appears first.</p>
+    <div class="price-list">
+      ${comparisonPrices(state.selectedStay).map((item) => `
+        <div class="price-row">
+          <span>${item.site}</span>
+          <strong>${money(item.price)}</strong>
+          <a href="${item.url}" target="_blank">Book</a>
+        </div>
+      `).join("")}
+    </div>
   `;
   routeStart.textContent = `Start: ${state.selectedStay.name}`;
 }
@@ -438,6 +653,9 @@ function renderBackup() {
 
 function renderMetrics() {
   document.getElementById("cityInput").value = state.city;
+  document.getElementById("locationStatus").textContent = state.locationDetected && state.location
+    ? `Detected near ${state.location.matchedCity} (${state.location.distanceKm} km match)`
+    : "Tap ◎ to detect your city";
   document.getElementById("citiesMetric").textContent = state.cities.length;
   document.getElementById("hospitalsMetric").textContent = state.route.length;
   document.getElementById("meetingsMetric").textContent = state.visits.length;
@@ -486,22 +704,35 @@ document.getElementById("cityInput").addEventListener("change", (event) => {
 });
 
 document.getElementById("detectBtn").addEventListener("click", () => {
-  state.city = "Bhubaneswar";
-  if (!state.cities.includes(state.city)) state.cities.push(state.city);
-  addQueue("Location detected");
-  save();
+  detectCurrentCity();
 });
 
 document.getElementById("findStayBtn").addEventListener("click", () => {
+  if (!state.locationDetected) detectCurrentCity();
   renderStayResults();
-  addQueue("Accommodation search completed");
+  addQueue("Nearby stay comparison updated");
   save();
 });
+
+document.getElementById("googleHostelsBtn").addEventListener("click", () => {
+  openGoogleStaySearch("hostel");
+});
+
+document.getElementById("googleHotelsBtn").addEventListener("click", () => {
+  openGoogleStaySearch("hotel");
+});
+
+document.getElementById("luxuryPoolBtn").addEventListener("click", () => {
+  openGoogleStaySearch("luxury");
+  renderLuxuryPoolResults();
+});
+
+document.getElementById("addManualStayBtn").addEventListener("click", addManualStay);
 
 document.getElementById("stayResults").addEventListener("click", (event) => {
   const button = event.target.closest("[data-stay]");
   if (!button) return;
-  state.selectedStay = getStayResults().find((stay) => stay.id === button.dataset.stay);
+  state.selectedStay = [...getStayResults(), ...getLuxuryPoolResults()].find((stay) => stay.id === button.dataset.stay);
   addQueue(`Accommodation selected: ${state.selectedStay.name}`);
   save();
 });
@@ -552,4 +783,8 @@ if (state.route.length && !document.getElementById("hospitalName").value) {
   state.selectedHospitalId = stop.id;
   loadHospitalIntoCrm(stop);
   renderAll();
+}
+
+if (!state.locationDetected) {
+  setTimeout(detectCurrentCity, 800);
 }

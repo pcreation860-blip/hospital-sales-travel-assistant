@@ -43,8 +43,9 @@
           <label for="cityInput">Current city</label>
           <div>
             <input id="cityInput" value="Bhubaneswar" />
-            <button id="detectBtn" class="icon-btn" title="Detect location">◎</button>
+            <button id="detectBtn" class="icon-btn" title="Detect my city">◎</button>
           </div>
+          <small id="locationStatus">Tap ◎ to detect your city</small>
         </div>
       </header>
 
@@ -112,12 +113,17 @@
                 <h2>Smart Accommodation Finder</h2>
                 <p>Bunk-bed hostels first. Budget hotels if needed.</p>
               </div>
-              <button id="findStayBtn" class="primary">Find stay</button>
+              <button id="findStayBtn" class="primary">Compare near me</button>
             </div>
             <div class="filters">
               <label><input type="checkbox" checked /> Clean beds</label>
               <label><input type="checkbox" checked /> Clean bathrooms</label>
               <label><input type="checkbox" checked /> AC</label>
+            </div>
+            <div class="button-row">
+              <button id="googleHostelsBtn" class="secondary">Google hostels near me</button>
+              <button id="googleHotelsBtn" class="secondary">Google hotels near me</button>
+              <button id="luxuryPoolBtn" class="secondary">Luxury pool stay near me</button>
             </div>
             <div id="stayResults" class="card-list"></div>
           </section>
@@ -125,6 +131,27 @@
           <section class="panel selected-panel">
             <h2>Selected Stay</h2>
             <div id="selectedStay" class="empty-state">Choose an accommodation to start route planning.</div>
+            <div id="priceCompare" class="price-compare"></div>
+            <div class="manual-stay">
+              <h2>Add Stay From Google</h2>
+              <p>Open Google, choose a hostel or hotel, then add the details here for comparison.</p>
+              <form class="form-grid single">
+                <label>Name<input id="manualStayName" placeholder="Example: Backpacker Panda Hostel" /></label>
+                <label>Type
+                  <select id="manualStayType">
+                    <option>Bunk Bed Hostel</option>
+                    <option>Budget Hotel</option>
+                    <option>Luxury Stay With Pool</option>
+                  </select>
+                </label>
+                <label>Price per night<input id="manualStayPrice" type="number" placeholder="700" /></label>
+                <label>Review score<input id="manualStayRating" type="number" step="0.1" max="5" placeholder="4.3" /></label>
+                <label>Distance from me in km<input id="manualStayDistance" type="number" step="0.1" placeholder="1.5" /></label>
+                <label class="full">Amenities<input id="manualStayAmenities" placeholder="AC, clean beds, clean bathrooms" /></label>
+                <label class="full">Google booking/map link<input id="manualStayLink" placeholder="Paste Google Maps or booking link" /></label>
+              </form>
+              <button id="addManualStayBtn" class="secondary">Add to comparison</button>
+            </div>
           </section>
         </div>
       </section>
