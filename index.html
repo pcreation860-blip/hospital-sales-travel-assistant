@@ -1,0 +1,263 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Hospital Sales Travel Assistant</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark">HS</div>
+        <div>
+          <strong>Hospital Sales</strong>
+          <span>Travel Assistant</span>
+        </div>
+      </div>
+
+      <nav class="nav" aria-label="Main">
+        <button class="nav-btn active" data-view="dashboard">Dashboard</button>
+        <button class="nav-btn" data-view="stay">Accommodation</button>
+        <button class="nav-btn" data-view="route">Route Planner</button>
+        <button class="nav-btn" data-view="crm">Visit CRM</button>
+        <button class="nav-btn" data-view="backup">Backup</button>
+      </nav>
+
+      <div class="sync-card">
+        <span class="sync-dot"></span>
+        <div>
+          <strong id="syncLabel">Synced</strong>
+          <small id="syncTime">Local backup ready</small>
+        </div>
+      </div>
+    </aside>
+
+    <main class="app-shell">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">Kolkata base / India field sales</p>
+          <h1 id="pageTitle">Dashboard</h1>
+        </div>
+        <div class="city-control">
+          <label for="cityInput">Current city</label>
+          <div>
+            <input id="cityInput" value="Bhubaneswar" />
+            <button id="detectBtn" class="icon-btn" title="Detect location">◎</button>
+          </div>
+        </div>
+      </header>
+
+      <section id="dashboard" class="view active">
+        <div class="metric-grid">
+          <article class="metric">
+            <span>Cities</span>
+            <strong id="citiesMetric">1</strong>
+          </article>
+          <article class="metric">
+            <span>Hospitals</span>
+            <strong id="hospitalsMetric">0</strong>
+          </article>
+          <article class="metric">
+            <span>Meetings</span>
+            <strong id="meetingsMetric">0</strong>
+          </article>
+          <article class="metric">
+            <span>Follow-ups</span>
+            <strong id="followupsMetric">0</strong>
+          </article>
+        </div>
+
+        <div class="dashboard-layout">
+          <section class="panel route-map-panel">
+            <div class="panel-head">
+              <div>
+                <h2>Today Route</h2>
+                <p>Accommodation loop with live CRM capture.</p>
+              </div>
+              <button class="primary" data-jump="route">Plan route</button>
+            </div>
+            <div class="route-visual" aria-label="Route preview">
+              <div class="home-pin">Stay</div>
+              <div class="route-line"></div>
+              <div class="pin p1">1</div>
+              <div class="pin p2">8</div>
+              <div class="pin p3">14</div>
+              <div class="pin p4">21</div>
+              <div class="pin p5">26</div>
+            </div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <h2>High Priority</h2>
+                <p>Leads needing action.</p>
+              </div>
+            </div>
+            <div id="priorityList" class="lead-list"></div>
+            <div class="button-row">
+              <button id="exportCsvBtn" class="secondary">Export CSV</button>
+              <button id="exportJsonBtn" class="secondary">Export backup</button>
+            </div>
+          </section>
+        </div>
+      </section>
+
+      <section id="stay" class="view">
+        <div class="two-col">
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <h2>Smart Accommodation Finder</h2>
+                <p>Bunk-bed hostels first. Budget hotels if needed.</p>
+              </div>
+              <button id="findStayBtn" class="primary">Find stay</button>
+            </div>
+            <div class="filters">
+              <label><input type="checkbox" checked /> Clean beds</label>
+              <label><input type="checkbox" checked /> Clean bathrooms</label>
+              <label><input type="checkbox" checked /> AC</label>
+            </div>
+            <div id="stayResults" class="card-list"></div>
+          </section>
+
+          <section class="panel selected-panel">
+            <h2>Selected Stay</h2>
+            <div id="selectedStay" class="empty-state">Choose an accommodation to start route planning.</div>
+          </section>
+        </div>
+      </section>
+
+      <section id="route" class="view">
+        <section class="panel">
+          <div class="panel-head">
+            <div>
+              <h2>Intelligent Sales Route Planner</h2>
+              <p>Minimum 26 hospital stops, start and end at accommodation.</p>
+            </div>
+            <button id="generateRouteBtn" class="primary">Generate 26-stop route</button>
+          </div>
+          <div class="route-summary">
+            <span id="routeStart">Start: No stay selected</span>
+            <span id="routeDistance">Distance: 0 km</span>
+            <span id="routeTime">ETA: 0 hr</span>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>No.</th>
+                  <th>Hospital</th>
+                  <th>Type</th>
+                  <th>Distance</th>
+                  <th>ETA</th>
+                  <th>CRM</th>
+                </tr>
+              </thead>
+              <tbody id="routeTable"></tbody>
+            </table>
+          </div>
+        </section>
+      </section>
+
+      <section id="crm" class="view">
+        <div class="crm-workspace">
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <h2>Hospital Visit CRM</h2>
+                <p>Choose a hospital from today route. Address, card scan, notes, and recording stay linked to that hospital.</p>
+              </div>
+              <button id="saveVisitBtn" class="primary">Save visit</button>
+            </div>
+
+            <div class="hospital-picker">
+              <label for="hospitalSelect">Route hospital</label>
+              <div>
+                <select id="hospitalSelect"></select>
+                <button id="loadHospitalBtn" class="secondary">Load hospital</button>
+              </div>
+            </div>
+
+            <form id="visitForm" class="form-grid">
+              <label>Hospital name<input id="hospitalName" required /></label>
+              <label>Address<input id="hospitalAddress" /></label>
+              <label>GPS coordinates<input id="gps" /></label>
+              <label>Date<input id="visitDate" type="date" /></label>
+              <label>Time<input id="visitTime" type="time" /></label>
+              <label>Person met<input id="personMet" /></label>
+              <label>Designation<input id="designation" /></label>
+              <label>Mobile number<input id="mobile" /></label>
+              <label>Email<input id="email" type="email" /></label>
+              <label>Uniform requirement<input id="requirement" /></label>
+              <label>Estimated order value<input id="orderValue" type="number" /></label>
+              <label>Follow-up date<input id="followupDate" type="date" /></label>
+              <label class="full">Written notes: deal, liking, order, instruction<textarea id="remarks" rows="4" placeholder="Example: liked cotton blend fabric, asked for quotation for 80 scrub sets, follow up with purchase manager."></textarea></label>
+              <label class="full">Recording transcription<textarea id="transcript" rows="4" placeholder="Recorded notes will be transcribed here automatically."></textarea></label>
+              <label class="full">AI meeting summary<textarea id="aiSummary" rows="4"></textarea></label>
+            </form>
+
+            <div class="button-row">
+              <button id="recordAudioBtn" class="secondary">Record note</button>
+              <button id="stopAudioBtn" class="secondary">Stop and transcribe</button>
+              <button id="summarizeBtn" class="secondary">Create AI summary</button>
+            </div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <h2>Business Card</h2>
+                <p>Scan card on the same hospital visit page.</p>
+              </div>
+              <button id="scanCardBtn" class="primary">Scan card</button>
+            </div>
+            <form class="form-grid single">
+              <label>Person name<input id="cardName" /></label>
+              <label>Designation<input id="cardDesignation" /></label>
+              <label>Hospital<input id="cardHospital" /></label>
+              <label>Mobile<input id="cardMobile" /></label>
+              <label>Email<input id="cardEmail" /></label>
+              <label>Website<input id="cardWebsite" /></label>
+              <label class="full">Office address<textarea id="cardAddress" rows="3"></textarea></label>
+            </form>
+            <button id="saveCardBtn" class="secondary">Save card to this hospital</button>
+          </section>
+
+          <section class="panel crm-side">
+            <h2>Customer Timeline</h2>
+            <div id="timeline" class="timeline"></div>
+          </section>
+
+          <section class="panel crm-side">
+            <h2>Cards For Selected Hospital</h2>
+            <div id="cardList" class="card-list"></div>
+          </section>
+        </div>
+      </section>
+
+      <section id="backup" class="view">
+        <div class="backup-grid">
+          <section class="panel">
+            <h2>Backup Dashboard</h2>
+            <div class="backup-status">
+              <div><span>Local device</span><strong>Active</strong></div>
+              <div><span>Firebase</span><strong id="firebaseStatus">Ready</strong></div>
+              <div><span>Google Drive</span><strong id="driveStatus">Ready</strong></div>
+              <div><span>AWS optional</span><strong>Not connected</strong></div>
+            </div>
+            <button id="syncBtn" class="primary">Run backup sync</button>
+          </section>
+
+          <section class="panel">
+            <h2>Offline Queue</h2>
+            <div id="queueList" class="queue-list"></div>
+          </section>
+        </div>
+      </section>
+    </main>
+
+    <script src="app.js"></script>
+  </body>
+</html>
