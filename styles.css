@@ -147,6 +147,13 @@ button {
   text-transform: uppercase;
 }
 
+.version-tag {
+  color: var(--green);
+  font-size: 13px;
+  font-weight: 700;
+  margin: 6px 0 0;
+}
+
 h1,
 h2,
 p {
