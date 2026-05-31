@@ -31,6 +31,11 @@ if (!("firebaseLastBackup" in state.backup)) state.backup.firebaseLastBackup = n
 
 let firebaseRuntime = null;
 
+// Voice recording state (Web Speech API)
+let voiceRecognition = null;
+let voiceActive = false;
+let voiceBaseText = "";
+
 const staySeeds = [
   { name: "City Backpackers Hostel", type: "Bunk Bed Hostel", price: 649, rating: 4.6, distance: 1.2, amenities: "AC, clean beds, clean bathrooms, lockers", source: "Hostelworld / Booking.com" },
   { name: "Metro Dorm Stay", type: "Bunk Bed Hostel", price: 590, rating: 4.3, distance: 2.4, amenities: "AC, clean bathrooms, Wi-Fi", source: "Agoda / Hostelz" },
@@ -692,23 +697,142 @@ function renderTimeline() {
   });
 }
 
-function simulateCardOcr() {
-  const selectedStop = state.route.find((item) => item.id === state.selectedHospitalId);
-  const routeHospital = selectedStop?.name || document.getElementById("hospitalName").value || `${state.city} Medistar Hospital`;
-  document.getElementById("cardName").value = routeHospital.includes("Bellvue") ? "Mr. S. Roy" : "Dr. Ankit Sharma";
-  document.getElementById("cardDesignation").value = routeHospital.includes("Bellvue") ? "Admin and Purchase Head" : "Purchase Manager";
-  document.getElementById("cardHospital").value = routeHospital;
-  document.getElementById("cardMobile").value = "+91 9830012345";
-  document.getElementById("cardEmail").value = "purchase@examplehospital.in";
-  document.getElementById("cardWebsite").value = "www.examplehospital.in";
-  document.getElementById("cardAddress").value = selectedStop?.address || document.getElementById("hospitalAddress").value || `Medical Road, ${state.city}`;
+/* ============================================================
+   BUSINESS CARD SCAN — real camera capture + on-device OCR
+   Uses Tesseract.js (loaded from CDN in index.html).
+   ============================================================ */
 
-  document.getElementById("personMet").value = document.getElementById("cardName").value;
-  document.getElementById("designation").value = document.getElementById("cardDesignation").value;
-  document.getElementById("mobile").value = document.getElementById("cardMobile").value;
-  document.getElementById("email").value = document.getElementById("cardEmail").value;
-  addQueue(`Business card scanned for ${routeHospital}`);
-  save();
+function setCardScanStatus(message) {
+  const el = document.getElementById("cardScanStatus");
+  if (!el) return;
+  el.style.display = message ? "block" : "none";
+  el.textContent = message || "";
+}
+
+function scanBusinessCard() {
+  const input = document.getElementById("cardImageInput");
+  if (!input) return;
+  input.value = "";   // allow re-selecting the same photo
+  input.click();      // opens the phone camera (capture="environment")
+}
+
+function parseBusinessCard(rawText) {
+  const text = rawText || "";
+  const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  const flat = lines.join(" ");
+  const result = { name: "", designation: "", hospital: "", mobile: "", email: "", website: "", address: "" };
+
+  // Email
+  const emailMatch = flat.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i);
+  if (emailMatch) result.email = emailMatch[0];
+
+  // Website (skip if it is just the email's domain)
+  const webMatch =
+    flat.match(/((https?:\/\/)?(www\.)[A-Z0-9.-]+\.[A-Z]{2,}(\/[^\s]*)?)/i) ||
+    flat.match(/\b[A-Z0-9-]{2,}\.(com|in|org|net|co\.in)\b/i);
+  if (webMatch) {
+    const w = webMatch[0];
+    const bareEmailDomain = result.email ? result.email.split("@")[1] : "";
+    if (!bareEmailDomain || !w.toLowerCase().includes(bareEmailDomain.toLowerCase())) {
+      result.website = w;
+    }
+  }
+
+  // Phone / mobile (pick a candidate with at least 10 digits)
+  const phoneCandidates = flat.match(/(\+?\d[\d\s().-]{8,}\d)/g) || [];
+  const cleaned = phoneCandidates
+    .map((p) => p.replace(/[^\d+]/g, ""))
+    .filter((p) => p.replace(/\D/g, "").length >= 10 && p.replace(/\D/g, "").length <= 13);
+  if (cleaned.length) result.mobile = cleaned.sort((a, b) => a.length - b.length)[0];
+
+  // Designation
+  const desigKeywords = /(purchase|procurement|manager|director|head|officer|executive|administrator|admin|in-?charge|matron|nursing|consultant|proprietor|owner|chairman|founder|ceo|managing director|\bmd\b|superintendent|stores?|materials)/i;
+  const desigLine = lines.find((l) => desigKeywords.test(l) && !/hospital|clinic|nursing home|@/i.test(l));
+  if (desigLine) result.designation = desigLine;
+
+  // Hospital / organisation
+  const hospKeywords = /(hospital|clinic|nursing home|medical|health|diagnostic|diagnostics|centre|center|ivf|fertility|care|polyclinic|laborator)/i;
+  const hospLine = lines.find((l) => hospKeywords.test(l) && !/@/.test(l) && l.length > 3);
+  if (hospLine) result.hospital = hospLine;
+
+  // Name (title line first, otherwise a short alphabetic line)
+  const titleLine = lines.find((l) => /^(dr\.?|mr\.?|mrs\.?|ms\.?|prof\.?)\s+/i.test(l));
+  if (titleLine) {
+    result.name = titleLine;
+  } else {
+    const nameLine = lines.find((l) =>
+      l !== result.hospital &&
+      l !== result.designation &&
+      !/@|www|http|\d{3}/.test(l) &&
+      /^[A-Za-z.\s]{3,40}$/.test(l) &&
+      l.split(/\s+/).length <= 4
+    );
+    if (nameLine) result.name = nameLine;
+  }
+
+  // Address (lines that look like an address; join them)
+  const addrKeywords = /(road|rd\.?|street|st\.?|lane|nagar|colony|sector|block|floor|near|opp\.?|behind|pin|\b\d{6}\b|kolkata|bhubaneswar|cuttack|india)/i;
+  const addrLines = lines.filter((l) =>
+    addrKeywords.test(l) &&
+    l !== result.hospital &&
+    l !== result.designation &&
+    l !== result.name &&
+    !/@/.test(l)
+  );
+  if (addrLines.length) result.address = addrLines.join(", ");
+
+  return result;
+}
+
+async function handleCardImage(file) {
+  if (!file) return;
+  if (typeof Tesseract === "undefined") {
+    alert("Card reader library did not load. Check your internet connection and reload the page.");
+    return;
+  }
+  const btn = document.getElementById("scanCardBtn");
+  if (btn) btn.disabled = true;
+  setCardScanStatus("Reading card 0%. First scan downloads the reader once, so please wait.");
+  try {
+    const result = await Tesseract.recognize(file, "eng", {
+      logger: (m) => {
+        if (m.status === "recognizing text") {
+          setCardScanStatus(`Reading card ${Math.round((m.progress || 0) * 100)}%`);
+        }
+      },
+    });
+    const text = (result && result.data && result.data.text) || "";
+    const parsed = parseBusinessCard(text);
+
+    // Fill card fields — anything not detected stays blank
+    document.getElementById("cardName").value = parsed.name;
+    document.getElementById("cardDesignation").value = parsed.designation;
+    if (parsed.hospital) document.getElementById("cardHospital").value = parsed.hospital;
+    document.getElementById("cardMobile").value = parsed.mobile;
+    document.getElementById("cardEmail").value = parsed.email;
+    document.getElementById("cardWebsite").value = parsed.website;
+    if (parsed.address) document.getElementById("cardAddress").value = parsed.address;
+
+    // Copy contact details into the visit form when found
+    if (parsed.name) document.getElementById("personMet").value = parsed.name;
+    if (parsed.designation) document.getElementById("designation").value = parsed.designation;
+    if (parsed.mobile) document.getElementById("mobile").value = parsed.mobile;
+    if (parsed.email) document.getElementById("email").value = parsed.email;
+
+    const found = Object.values(parsed).filter(Boolean).length;
+    if (found === 0) {
+      setCardScanStatus("No clear text found. Try a brighter, closer, straight-on photo of the card.");
+    } else {
+      setCardScanStatus(`Card read. ${found} field(s) detected. Check and correct anything, then tap Save card.`);
+    }
+    addQueue("Business card scanned from camera");
+    save();
+  } catch (error) {
+    setCardScanStatus("Could not read the card. Please try again with a clearer photo.");
+    alert(`Card scan failed: ${error.message}`);
+  } finally {
+    if (btn) btn.disabled = false;
+  }
 }
 
 function saveCard() {
@@ -767,34 +891,162 @@ function renderCards() {
   });
 }
 
-function simulateAudioNote() {
-  const hospital = document.getElementById("hospitalName").value || `${state.city} hospital`;
-  document.getElementById("transcript").value = `Recording started for ${hospital}. Speak meeting notes, deal details, fabric preference, order quantity, and instructions.`;
-  addQueue("Recording started locally");
+/* ============================================================
+   VOICE NOTE — real microphone capture + live transcription
+   Uses the browser Web Speech API (works in Chrome).
+   ============================================================ */
+
+function getSpeechRecognition() {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  return SR ? new SR() : null;
+}
+
+function setRecordButton(isRecording) {
+  const btn = document.getElementById("recordAudioBtn");
+  if (btn) btn.textContent = isRecording ? "● Listening..." : "Record note";
+}
+
+function startVoiceNote() {
+  const transcriptEl = document.getElementById("transcript");
+  if (voiceActive) return; // already recording
+
+  const recognition = getSpeechRecognition();
+  if (!recognition) {
+    alert("Live transcription is not supported in this browser. Please open the app in Google Chrome.");
+    return;
+  }
+  voiceRecognition = recognition;
+  voiceActive = true;
+  voiceBaseText = transcriptEl.value ? transcriptEl.value.trim() + " " : "";
+
+  recognition.lang = "en-IN";       // Indian English
+  recognition.continuous = true;
+  recognition.interimResults = true;
+
+  recognition.onresult = (event) => {
+    let finalText = "";
+    let interimText = "";
+    for (let i = event.resultIndex; i < event.results.length; i++) {
+      const chunk = event.results[i][0].transcript;
+      if (event.results[i].isFinal) finalText += chunk + " ";
+      else interimText += chunk;
+    }
+    if (finalText) voiceBaseText += finalText;
+    transcriptEl.value = (voiceBaseText + interimText).trim();
+  };
+
+  recognition.onerror = (event) => {
+    if (event.error === "not-allowed" || event.error === "service-not-allowed") {
+      voiceActive = false;
+      setRecordButton(false);
+      alert("Microphone permission is needed. Allow mic access for this site and try again.");
+    }
+  };
+
+  recognition.onend = () => {
+    // Android stops listening after a pause — restart while still recording
+    if (voiceActive) {
+      try { recognition.start(); } catch (e) { /* ignore quick restart errors */ }
+    }
+  };
+
+  try {
+    recognition.start();
+    setRecordButton(true);
+    addQueue("Voice recording started");
+  } catch (e) {
+    voiceActive = false;
+    setRecordButton(false);
+  }
+}
+
+function stopVoiceNote() {
+  if (!voiceActive) return; // nothing is recording
+  voiceActive = false;
+  setRecordButton(false);
+  try { voiceRecognition && voiceRecognition.stop(); } catch (e) { /* ignore */ }
+
+  const transcriptEl = document.getElementById("transcript");
+  transcriptEl.value = transcriptEl.value.trim();
+  addQueue("Recording stopped and transcribed");
   save();
 }
 
-function stopAndTranscribeAudio() {
-  const hospital = document.getElementById("hospitalName").value || `${state.city} hospital`;
-  const person = document.getElementById("personMet").value || "the buyer";
-  document.getElementById("transcript").value = `Auto transcription: Meeting at ${hospital} with ${person}. They liked breathable scrub suit fabric and requested samples for nurses and OT staff. Estimated requirement is 80 to 120 sets. They asked for quotation, size chart, color options, and delivery timeline. Follow up with purchase department after two days.`;
-  document.getElementById("remarks").value = document.getElementById("remarks").value || "Deal note: send quotation, fabric sample, size chart, and color options. Follow up with purchase department.";
-  addQueue("Recording transcribed and linked to selected hospital");
-  save();
-}
+/* ============================================================
+   MEETING SUMMARY — built from the real notes + transcript
+   ============================================================ */
 
 function createAiSummary() {
-  const hospital = document.getElementById("hospitalName").value || "this hospital";
-  const requirement = document.getElementById("requirement").value || "hospital uniform requirement";
-  const notes = document.getElementById("remarks").value || document.getElementById("transcript").value || "no detailed notes yet";
-  document.getElementById("aiSummary").value = [
-    `Summary: ${hospital} is interested in ${requirement}.`,
-    `Field notes: ${notes}`,
-    "Key requirement: send catalogue, fabric samples, and price quotation.",
-    "Next action: follow up with purchase or HR contact within 2 working days.",
-    "Recommendation: mark as medium-to-high potential if order value is above Rs 50,000."
-  ].join("\n");
-  addQueue("AI meeting summary generated");
+  const hospital = document.getElementById("hospitalName").value.trim() || "this hospital";
+  const requirement = document.getElementById("requirement").value.trim();
+  const person = document.getElementById("personMet").value.trim();
+  const designation = document.getElementById("designation").value.trim();
+  const orderValue = Number(document.getElementById("orderValue").value || 0);
+  const followup = document.getElementById("followupDate").value;
+  const notes = document.getElementById("remarks").value.trim();
+  const transcript = document.getElementById("transcript").value.trim();
+  const source = [notes, transcript].filter(Boolean).join(". ");
+
+  if (!source && !requirement) {
+    alert("Add written notes, record a voice note, or fill the requirement first, then create the summary.");
+    return;
+  }
+
+  const lower = source.toLowerCase();
+
+  // Quantity — ranges like "80 to 120" or single "100 sets"
+  let quantity = "";
+  const rangeMatch = source.match(/(\d{2,4})\s*(?:to|-|–)\s*(\d{2,4})\s*(sets|pieces|pcs|units)?/i);
+  const singleMatch = source.match(/(\d{2,4})\s*(sets|pieces|pcs|units)/i);
+  if (rangeMatch) quantity = `${rangeMatch[1]} to ${rangeMatch[2]} ${rangeMatch[3] || "sets"}`.trim();
+  else if (singleMatch) quantity = `${singleMatch[1]} ${singleMatch[2]}`;
+
+  // Items the buyer asked for
+  const items = [];
+  const itemMap = {
+    quotation: /quotation|quote|price|pricing|rate/,
+    "fabric sample": /sample|fabric|cloth|material/,
+    "size chart": /size chart|sizing|measurement/,
+    "colour options": /colour|color|shade/,
+    catalogue: /catalogue|catalog|brochure/,
+    "delivery timeline": /delivery|timeline|lead time|dispatch/,
+  };
+  Object.entries(itemMap).forEach(([label, re]) => { if (re.test(lower)) items.push(label); });
+
+  // Staff mentioned
+  const staff = [];
+  [["nurses", /nurse/], ["doctors", /doctor|physician/], ["OT staff", /ot staff|operation theat/], ["lab staff", /\blab\b|laborator/], ["housekeeping", /housekeep|cleaning staff/]]
+    .forEach(([label, re]) => { if (re.test(lower)) staff.push(label); });
+
+  // Follow-up timing from the text
+  let followTiming = "";
+  const ft = source.match(/(?:after|within|in)\s+(\d+)\s*(day|days|week|weeks)/i);
+  if (ft) followTiming = `${ft[1]} ${ft[2]}`;
+
+  const lines = [];
+  lines.push(`Hospital: ${hospital}.`);
+  if (person) lines.push(`Contact: ${person}${designation ? ", " + designation : ""}.`);
+  if (requirement) lines.push(`Requirement: ${requirement}.`);
+  if (quantity) lines.push(`Estimated quantity: ${quantity}.`);
+  if (staff.length) lines.push(`For: ${staff.join(", ")}.`);
+  if (items.length) lines.push(`Buyer asked for: ${items.join(", ")}.`);
+  if (orderValue) lines.push(`Estimated order value: ${money(orderValue)}.`);
+  if (followup) lines.push(`Follow-up date: ${followup}.`);
+  else if (followTiming) lines.push(`Follow-up: after ${followTiming}.`);
+
+  const action = items.length
+    ? `Next action: send ${items.join(", ")}, then follow up${followTiming ? " in " + followTiming : ""}.`
+    : `Next action: follow up with purchase/HR contact${followTiming ? " in " + followTiming : " within 2 working days"}.`;
+  lines.push(action);
+
+  let rating = "Medium";
+  if (orderValue >= 100000) rating = "High";
+  else if (orderValue > 0 && orderValue < 30000) rating = "Low";
+  else if (/(\d{3,})/.test(quantity)) rating = "High";
+  lines.push(`Lead potential: ${rating}.`);
+
+  document.getElementById("aiSummary").value = lines.join("\n");
+  addQueue("Meeting summary generated from notes");
   save();
 }
 
@@ -981,7 +1233,8 @@ document.getElementById("loadHospitalBtn").addEventListener("click", () => {
 });
 
 document.getElementById("saveVisitBtn").addEventListener("click", saveVisit);
-document.getElementById("scanCardBtn").addEventListener("click", simulateCardOcr);
+document.getElementById("scanCardBtn").addEventListener("click", scanBusinessCard);
+document.getElementById("cardImageInput").addEventListener("change", (event) => handleCardImage(event.target.files[0]));
 document.getElementById("saveCardBtn").addEventListener("click", saveCard);
 document.getElementById("syncBtn").addEventListener("click", runSync);
 document.getElementById("downloadBackupBtn").addEventListener("click", downloadBackup);
@@ -998,8 +1251,8 @@ document.getElementById("connectFirebaseBtn").addEventListener("click", connectF
 document.getElementById("cloudBackupBtn").addEventListener("click", cloudBackupNow);
 document.getElementById("cloudRestoreBtn").addEventListener("click", restoreFromCloud);
 document.getElementById("deleteCloudBackupBtn").addEventListener("click", deleteCloudBackup);
-document.getElementById("recordAudioBtn").addEventListener("click", simulateAudioNote);
-document.getElementById("stopAudioBtn").addEventListener("click", stopAndTranscribeAudio);
+document.getElementById("recordAudioBtn").addEventListener("click", startVoiceNote);
+document.getElementById("stopAudioBtn").addEventListener("click", stopVoiceNote);
 document.getElementById("summarizeBtn").addEventListener("click", createAiSummary);
 document.getElementById("exportCsvBtn").addEventListener("click", exportCsv);
 document.getElementById("exportJsonBtn").addEventListener("click", exportJson);

@@ -222,7 +222,7 @@
               <label>Estimated order value<input id="orderValue" type="number" /></label>
               <label>Follow-up date<input id="followupDate" type="date" /></label>
               <label class="full">Written notes: deal, liking, order, instruction<textarea id="remarks" rows="4" placeholder="Example: liked cotton blend fabric, asked for quotation for 80 scrub sets, follow up with purchase manager."></textarea></label>
-              <label class="full">Recording transcription<textarea id="transcript" rows="4" placeholder="Recorded notes will be transcribed here automatically."></textarea></label>
+              <label class="full">Recording transcription<textarea id="transcript" rows="4" placeholder="Tap Record note and speak. Your words appear here live."></textarea></label>
               <label class="full">AI meeting summary<textarea id="aiSummary" rows="4"></textarea></label>
             </form>
 
@@ -241,6 +241,8 @@
               </div>
               <button id="scanCardBtn" class="primary">Scan card</button>
             </div>
+            <input id="cardImageInput" type="file" accept="image/*" capture="environment" hidden />
+            <p id="cardScanStatus" class="backup-note" style="display:none; margin-top:0;"></p>
             <form class="form-grid single">
               <label>Person name<input id="cardName" /></label>
               <label>Designation<input id="cardDesignation" /></label>
@@ -314,6 +316,8 @@
       </section>
     </main>
 
+    <!-- OCR engine for business-card scanning (runs in the browser) -->
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js"></script>
     <script src="app.js"></script>
   </body>
 </html>
