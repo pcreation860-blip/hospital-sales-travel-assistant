@@ -17,6 +17,7 @@ const state = JSON.parse(localStorage.getItem("hsTravelApp") || "null") || {
     firebaseLastBackup: null,
   },
   firebaseConfig: null,
+  recordings: [],
   queue: ["Initial local database created"],
   cities: ["Bhubaneswar"],
 };
@@ -28,13 +29,18 @@ if (!("backup" in state)) state.backup = { auto: true, lastBackup: null, backupS
 if (!("firebaseConfig" in state)) state.firebaseConfig = null;
 if (!("firebaseConnected" in state.backup)) state.backup.firebaseConnected = false;
 if (!("firebaseLastBackup" in state.backup)) state.backup.firebaseLastBackup = null;
+if (!("recordings" in state)) state.recordings = [];
 
 let firebaseRuntime = null;
 
-// Voice recording state (Web Speech API)
+// Voice recording state (Web Speech API + MediaRecorder)
 let voiceRecognition = null;
 let voiceActive = false;
 let voiceBaseText = "";
+let mediaRecorder = null;
+let mediaStream = null;
+let recordedChunks = [];
+let pendingRecording = null; // { dataUrl, mime, transcript, hospital, hospitalId, sizeKB }
 
 const staySeeds = [
   { name: "City Backpackers Hostel", type: "Bunk Bed Hostel", price: 649, rating: 4.6, distance: 1.2, amenities: "AC, clean beds, clean bathrooms, lockers", source: "Hostelworld / Booking.com" },
@@ -903,23 +909,101 @@ function getSpeechRecognition() {
 
 function setRecordButton(isRecording) {
   const btn = document.getElementById("recordAudioBtn");
-  if (btn) btn.textContent = isRecording ? "● Listening..." : "Record note";
+  if (btn) btn.textContent = isRecording ? "● Recording..." : "Record note";
 }
 
-function startVoiceNote() {
-  const transcriptEl = document.getElementById("transcript");
-  if (voiceActive) return; // already recording
+function setRecordingStatus(message) {
+  const el = document.getElementById("recordingStatus");
+  if (!el) return;
+  el.style.display = message ? "block" : "none";
+  el.textContent = message || "";
+}
 
+function showRecordingPlayer(dataUrl, filename) {
+  const player = document.getElementById("recordingPlayer");
+  const dl = document.getElementById("downloadRecordingLink");
+  if (player && dataUrl) { player.src = dataUrl; player.style.display = "block"; }
+  if (dl && dataUrl) {
+    dl.href = dataUrl;
+    if (filename) dl.setAttribute("download", filename);
+    dl.style.display = "inline-block";
+  }
+}
+
+function blobToDataUrl(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(new Error("Could not read recording"));
+    reader.readAsDataURL(blob);
+  });
+}
+
+function fileExtForMime(mime) {
+  const m = (mime || "").toLowerCase();
+  if (m.includes("mp4")) return "mp4";
+  if (m.includes("ogg")) return "ogg";
+  if (m.includes("wav")) return "wav";
+  if (m.includes("mpeg") || m.includes("mp3")) return "mp3";
+  return "webm";
+}
+
+function recordingFileName(hospital, mime) {
+  const safe = (hospital || "recording").replace(/[^a-z0-9]+/gi, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "recording";
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+  return `${safe}-${stamp}.${fileExtForMime(mime)}`;
+}
+
+// MP4 conversion via ffmpeg.wasm (loaded from CDN in index.html)
+let ffmpegInstance = null;
+
+async function ensureFfmpegLoaded() {
+  if (ffmpegInstance) return ffmpegInstance;
+  if (typeof FFmpeg === "undefined" || !FFmpeg.createFFmpeg) {
+    throw new Error("MP4 converter library did not load. Check your internet connection and reload the page.");
+  }
+  setRecordingStatus("Loading MP4 converter (one-time download, about 25 MB)...");
+  const inst = FFmpeg.createFFmpeg({
+    log: false,
+    corePath: "https://cdn.jsdelivr.net/npm/@ffmpeg/[email protected]/dist/ffmpeg-core.js",
+  });
+  await inst.load();
+  ffmpegInstance = inst;
+  return ffmpegInstance;
+}
+
+async function convertBlobToMp4(blob, sourceMime) {
+  const ffmpeg = await ensureFfmpegLoaded();
+  const ext = fileExtForMime(sourceMime) || "webm";
+  const inputName = `input.${ext}`;
+  ffmpeg.FS("writeFile", inputName, await FFmpeg.fetchFile(blob));
+  setRecordingStatus("Converting recording to MP4...");
+  // Mono, 16 kHz, AAC 24 kbps — small enough to fit ~4 minutes of voice in cloud doc limit.
+  await ffmpeg.run(
+    "-i", inputName,
+    "-vn",
+    "-ac", "1",
+    "-ar", "16000",
+    "-c:a", "aac",
+    "-b:a", "24k",
+    "output.mp4"
+  );
+  const data = ffmpeg.FS("readFile", "output.mp4");
+  try { ffmpeg.FS("unlink", inputName); } catch (e) { /* ignore */ }
+  try { ffmpeg.FS("unlink", "output.mp4"); } catch (e) { /* ignore */ }
+  return new Blob([data.buffer], { type: "audio/mp4" });
+}
+
+// Live transcription (best-effort, runs alongside the audio recorder)
+function startTranscription(transcriptEl) {
   const recognition = getSpeechRecognition();
   if (!recognition) {
-    alert("Live transcription is not supported in this browser. Please open the app in Google Chrome.");
+    setRecordingStatus("Recording audio. Live transcription is not supported in this browser.");
     return;
   }
   voiceRecognition = recognition;
-  voiceActive = true;
   voiceBaseText = transcriptEl.value ? transcriptEl.value.trim() + " " : "";
-
-  recognition.lang = "en-IN";       // Indian English
+  recognition.lang = "en-IN";
   recognition.continuous = true;
   recognition.interimResults = true;
 
@@ -935,41 +1019,246 @@ function startVoiceNote() {
     transcriptEl.value = (voiceBaseText + interimText).trim();
   };
 
-  recognition.onerror = (event) => {
-    if (event.error === "not-allowed" || event.error === "service-not-allowed") {
-      voiceActive = false;
-      setRecordButton(false);
-      alert("Microphone permission is needed. Allow mic access for this site and try again.");
-    }
-  };
+  recognition.onerror = () => { /* keep recording audio even if transcription fails */ };
 
   recognition.onend = () => {
-    // Android stops listening after a pause — restart while still recording
     if (voiceActive) {
-      try { recognition.start(); } catch (e) { /* ignore quick restart errors */ }
+      try { recognition.start(); } catch (e) { /* ignore */ }
     }
   };
 
+  try { recognition.start(); } catch (e) { /* ignore */ }
+}
+
+async function startVoiceNote() {
+  if (voiceActive) return; // already recording
+  const transcriptEl = document.getElementById("transcript");
+
+  // 1) Capture real microphone audio
   try {
-    recognition.start();
-    setRecordButton(true);
-    addQueue("Voice recording started");
+    mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
   } catch (e) {
-    voiceActive = false;
-    setRecordButton(false);
+    alert("Microphone permission is needed to record. Allow mic access for this site and try again.");
+    return;
   }
+
+  recordedChunks = [];
+  let options = {};
+  // Try mp4 first (best compatibility); fall back to webm/opus on Android Chrome.
+  if (window.MediaRecorder && MediaRecorder.isTypeSupported) {
+    if (MediaRecorder.isTypeSupported("audio/mp4;codecs=mp4a.40.2")) {
+      options = { mimeType: "audio/mp4;codecs=mp4a.40.2", audioBitsPerSecond: 24000 };
+    } else if (MediaRecorder.isTypeSupported("audio/mp4")) {
+      options = { mimeType: "audio/mp4", audioBitsPerSecond: 24000 };
+    } else if (MediaRecorder.isTypeSupported("audio/webm;codecs=opus")) {
+      options = { mimeType: "audio/webm;codecs=opus", audioBitsPerSecond: 16000 };
+    }
+  }
+  try {
+    mediaRecorder = new MediaRecorder(mediaStream, options);
+  } catch (e) {
+    mediaRecorder = new MediaRecorder(mediaStream);
+  }
+  mediaRecorder.ondataavailable = (ev) => { if (ev.data && ev.data.size) recordedChunks.push(ev.data); };
+  mediaRecorder.onstop = handleRecordingStop;
+  mediaRecorder.start();
+
+  voiceActive = true;
+  setRecordButton(true);
+  setRecordingStatus("Recording... speak your meeting notes.");
+  addQueue("Voice recording started");
+
+  // 2) Transcribe live at the same time (best-effort)
+  startTranscription(transcriptEl);
 }
 
 function stopVoiceNote() {
   if (!voiceActive) return; // nothing is recording
   voiceActive = false;
   setRecordButton(false);
-  try { voiceRecognition && voiceRecognition.stop(); } catch (e) { /* ignore */ }
 
+  try { voiceRecognition && voiceRecognition.stop(); } catch (e) { /* ignore */ }
+  try { if (mediaRecorder && mediaRecorder.state !== "inactive") mediaRecorder.stop(); } catch (e) { /* ignore */ }
+  try { mediaStream && mediaStream.getTracks().forEach((t) => t.stop()); } catch (e) { /* ignore */ }
+}
+
+async function handleRecordingStop() {
   const transcriptEl = document.getElementById("transcript");
-  transcriptEl.value = transcriptEl.value.trim();
+  const transcript = transcriptEl.value.trim();
+  const sourceMime = (mediaRecorder && mediaRecorder.mimeType) || "audio/webm";
+  const sourceBlob = new Blob(recordedChunks, { type: sourceMime });
+  recordedChunks = [];
+
+  if (!sourceBlob.size) {
+    setRecordingStatus("No audio was captured. Please try again.");
+    addQueue("Recording stopped (no audio)");
+    save();
+    return;
+  }
+
+  // Convert to MP4 unless the browser already produced MP4.
+  let finalBlob = sourceBlob;
+  let finalMime = sourceMime;
+  if (!sourceMime.toLowerCase().includes("mp4")) {
+    try {
+      finalBlob = await convertBlobToMp4(sourceBlob, sourceMime);
+      finalMime = "audio/mp4";
+    } catch (err) {
+      setRecordingStatus(`MP4 conversion failed: ${err.message}. Keeping original ${fileExtForMime(sourceMime)} so the recording is not lost.`);
+      // Fall through with the original blob so the recording is still saved.
+    }
+  }
+
+  const dataUrl = await blobToDataUrl(finalBlob);
+  const sizeKB = Math.ceil(dataUrl.length / 1024);
+  const selectedStop = state.route.find((i) => i.id === state.selectedHospitalId);
+  const hospital = selectedStop?.name || document.getElementById("hospitalName").value || `${state.city} hospital`;
+
+  pendingRecording = { dataUrl, mime: finalMime, transcript, hospital, hospitalId: state.selectedHospitalId, sizeKB };
+  showRecordingPlayer(dataUrl, recordingFileName(hospital, finalMime));
   addQueue("Recording stopped and transcribed");
   save();
+
+  if (state.backup.firebaseConnected) {
+    await uploadPendingRecording();
+  } else {
+    setRecordingStatus(`Recording ready as ${fileExtForMime(finalMime).toUpperCase()} (${sizeKB} KB). Connect Firebase, then tap "Save recording to cloud".`);
+  }
+}
+
+async function uploadPendingRecording() {
+  if (!pendingRecording) {
+    alert("Record a voice note first.");
+    return;
+  }
+  const config = state.firebaseConfig || firebaseConfigFromForm();
+  if (!validateFirebaseConfig(config)) {
+    alert("Connect Firebase first, then save the recording to cloud.");
+    return;
+  }
+  // Firestore allows ~1 MB per document; keep a safe margin.
+  if (pendingRecording.dataUrl.length > 950000) {
+    setRecordingStatus("Recording is too long for free cloud storage (about 5 min max). Use Download to keep it.");
+    alert("This recording is too long to store on the free Firebase plan. You can download it, or record a shorter note.");
+    return;
+  }
+  try {
+    setRecordingStatus("Saving recording to cloud...");
+    const runtime = await loadFirebaseRuntime(config);
+    const id = `rec-${Date.now()}`;
+    await runtime.setDoc(
+      runtime.doc(runtime.db, "users", runtime.userId, "recordings", id),
+      {
+        hospital: pendingRecording.hospital,
+        hospitalId: pendingRecording.hospitalId || "",
+        transcript: pendingRecording.transcript || "",
+        audio: pendingRecording.dataUrl,
+        mime: pendingRecording.mime,
+        sizeKB: pendingRecording.sizeKB,
+        createdAt: runtime.serverTimestamp(),
+        createdAtLocal: new Date().toISOString(),
+      }
+    );
+    // Keep only metadata + transcript locally (no audio) so the browser backup stays small.
+    state.recordings.unshift({
+      id,
+      hospital: pendingRecording.hospital,
+      hospitalId: pendingRecording.hospitalId || "",
+      transcript: pendingRecording.transcript || "",
+      sizeKB: pendingRecording.sizeKB,
+      mime: pendingRecording.mime,
+      createdAt: new Date().toISOString(),
+    });
+    state.backup.firebaseConnected = true;
+    state.backup.firebaseLastBackup = new Date().toISOString();
+    setRecordingStatus(`Recording saved to cloud (${pendingRecording.sizeKB} KB). Transcript kept too.`);
+    addQueue(`Recording saved to cloud for ${pendingRecording.hospital}`);
+    pendingRecording = null;
+    save();
+  } catch (error) {
+    setRecordingStatus("Could not save recording to cloud.");
+    alert(`Save recording failed: ${error.message}`);
+  }
+}
+
+async function playCloudRecording(id) {
+  const config = state.firebaseConfig || firebaseConfigFromForm();
+  if (!validateFirebaseConfig(config)) {
+    alert("Connect Firebase first to play saved recordings.");
+    return;
+  }
+  try {
+    setRecordingStatus("Loading recording from cloud...");
+    const runtime = await loadFirebaseRuntime(config);
+    const snap = await runtime.getDoc(runtime.doc(runtime.db, "users", runtime.userId, "recordings", id));
+    if (!snap.exists()) {
+      setRecordingStatus("");
+      alert("This recording was not found in cloud.");
+      return;
+    }
+    const data = snap.data();
+    showRecordingPlayer(data.audio, recordingFileName(data.hospital, data.mime));
+    setRecordingStatus(`Playing recording from ${data.hospital || "hospital"}.`);
+    const player = document.getElementById("recordingPlayer");
+    if (player && player.play) player.play().catch(() => {});
+  } catch (error) {
+    setRecordingStatus("");
+    alert(`Could not load recording: ${error.message}`);
+  }
+}
+
+async function deleteCloudRecording(id) {
+  if (!confirm("Delete this recording from cloud?")) return;
+  const config = state.firebaseConfig || firebaseConfigFromForm();
+  if (!validateFirebaseConfig(config)) {
+    alert("Connect Firebase first.");
+    return;
+  }
+  try {
+    const runtime = await loadFirebaseRuntime(config);
+    await runtime.deleteDoc(runtime.doc(runtime.db, "users", runtime.userId, "recordings", id));
+    state.recordings = state.recordings.filter((r) => r.id !== id);
+    addQueue("Recording deleted from cloud");
+    save();
+  } catch (error) {
+    alert(`Delete recording failed: ${error.message}`);
+  }
+}
+
+function renderRecordings() {
+  const list = document.getElementById("recordingList");
+  if (!list) return;
+  list.innerHTML = "";
+  const selectedStop = state.route.find((item) => item.id === state.selectedHospitalId);
+  const selectedName = selectedStop?.name || document.getElementById("hospitalName")?.value;
+  const recs = state.recordings.filter((rec) =>
+    (state.selectedHospitalId && rec.hospitalId === state.selectedHospitalId) ||
+    (selectedName && rec.hospital === selectedName)
+  );
+  if (!recs.length) {
+    list.innerHTML = `<div class="empty-state">No saved recordings for the selected hospital.</div>`;
+    return;
+  }
+  recs.forEach((rec) => {
+    const item = document.createElement("article");
+    item.className = "result-card";
+    const snippet = rec.transcript
+      ? rec.transcript.slice(0, 140) + (rec.transcript.length > 140 ? "..." : "")
+      : "No transcript";
+    item.innerHTML = `
+      <div class="card-photo" aria-hidden="true"></div>
+      <div>
+        <strong>${rec.hospital || "Recording"}</strong>
+        <span>${new Date(rec.createdAt).toLocaleString()} / ${rec.sizeKB || 0} KB</span><br />
+        <span>${snippet}</span>
+      </div>
+      <div class="contact-actions">
+        <button class="mini-btn" data-play-rec="${rec.id}">Play</button>
+        <button class="mini-btn" data-del-rec="${rec.id}">Delete</button>
+      </div>
+    `;
+    list.appendChild(item);
+  });
 }
 
 /* ============================================================
@@ -1151,6 +1440,7 @@ function renderAll() {
   renderHospitalSelect();
   renderTimeline();
   renderCards();
+  renderRecordings();
   renderPriority();
   renderBackup();
   renderMetrics();
@@ -1253,6 +1543,13 @@ document.getElementById("cloudRestoreBtn").addEventListener("click", restoreFrom
 document.getElementById("deleteCloudBackupBtn").addEventListener("click", deleteCloudBackup);
 document.getElementById("recordAudioBtn").addEventListener("click", startVoiceNote);
 document.getElementById("stopAudioBtn").addEventListener("click", stopVoiceNote);
+document.getElementById("saveRecordingBtn").addEventListener("click", uploadPendingRecording);
+document.getElementById("recordingList").addEventListener("click", (event) => {
+  const playBtn = event.target.closest("[data-play-rec]");
+  const delBtn = event.target.closest("[data-del-rec]");
+  if (playBtn) playCloudRecording(playBtn.dataset.playRec);
+  if (delBtn) deleteCloudRecording(delBtn.dataset.delRec);
+});
 document.getElementById("summarizeBtn").addEventListener("click", createAiSummary);
 document.getElementById("exportCsvBtn").addEventListener("click", exportCsv);
 document.getElementById("exportJsonBtn").addEventListener("click", exportJson);

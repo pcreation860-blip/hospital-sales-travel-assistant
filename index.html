@@ -231,6 +231,15 @@
               <button id="stopAudioBtn" class="secondary">Stop and transcribe</button>
               <button id="summarizeBtn" class="secondary">Create AI summary</button>
             </div>
+
+            <div class="recording-controls" style="margin-top:14px;">
+              <audio id="recordingPlayer" controls style="display:none; width:100%; margin-bottom:10px;"></audio>
+              <p id="recordingStatus" class="backup-note" style="display:none; margin-top:0;"></p>
+              <div class="button-row">
+                <button id="saveRecordingBtn" class="secondary">Save recording to cloud</button>
+                <a id="downloadRecordingLink" class="secondary" download="meeting-recording.mp4" style="display:none; text-align:center; text-decoration:none; line-height:40px; margin-top:0;">Download recording</a>
+              </div>
+            </div>
           </section>
 
           <section class="panel">
@@ -263,6 +272,11 @@
           <section class="panel crm-side">
             <h2>Cards For Selected Hospital</h2>
             <div id="cardList" class="card-list"></div>
+          </section>
+
+          <section class="panel crm-side">
+            <h2>Voice Recordings</h2>
+            <div id="recordingList" class="card-list"></div>
           </section>
         </div>
       </section>
@@ -318,6 +332,8 @@
 
     <!-- OCR engine for business-card scanning (runs in the browser) -->
     <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js"></script>
+    <!-- MP4 audio converter (runs in the browser; downloads ~25 MB on first use, then cached) -->
+    <script src="https://cdn.jsdelivr.net/npm/@ffmpeg/[email protected]/dist/ffmpeg.min.js"></script>
     <script src="app.js"></script>
   </body>
 </html>
